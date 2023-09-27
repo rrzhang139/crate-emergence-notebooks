@@ -154,6 +154,18 @@ class CRATE(nn.Module):
         feature_last = x
         return self.mlp_head(x)
 
+    def forward_patch_repr(self, img):
+        x = self.to_patch_embedding(img)
+        b, n, _ = x.shape
+
+        cls_tokens = repeat(self.cls_token, '1 1 d -> b 1 d', b = b)
+        x = torch.cat((cls_tokens, x), dim=1)
+        x += self.pos_embedding[:, :(n + 1)]
+        x = self.dropout(x)
+
+        x = self.transformer(x)
+        return x
+
     def get_last_key(self, img, depth = 11):
         x = self.to_patch_embedding(img)
         b, n, _ = x.shape
@@ -314,4 +326,15 @@ class CRATEFeat(nn.Module):
             qkv = self.model.get_last_key(img, depth = self.depth)
             qkv = qkv[None, :, :, :]
             return qkv[:, :, 1:, :]
+    
+    # Get patch representation
+    def forward_repr(self, img):
+        with torch.no_grad():
             
+            h, w = img.shape[2], img.shape[3]
+            feat_h, feat_w = h // self.patch_size, w // self.patch_size
+            img = img[:, :, :feat_h * self.patch_size, :feat_w * self.patch_size]
+            pos_em = self.model.interpolate_pos_encoding(img, w, h)
+            self.model.pos_embedding = nn.Parameter(self.model.interpolate_pos_encoding(img, w, h))
+            representations = self.model.forward_patch_repr(img)
+            return representations
